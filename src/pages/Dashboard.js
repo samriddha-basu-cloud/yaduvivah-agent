@@ -12,6 +12,7 @@ export default function Dashboard() {
   const { currentUser, logout } = useAuth();
   const [agentData, setAgentData] = useState(null);
   const [activeTab, setActiveTab] = useState("dashboard"); // State to track active tab
+  const [isFixed, setIsFixed] = useState(false); // State to track if SubHeaderNav is fixed
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -30,6 +31,22 @@ export default function Dashboard() {
 
     fetchAgentData();
   }, [currentUser]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const headerHeight = document.querySelector('header').offsetHeight;
+      if (window.scrollY > headerHeight) {
+        setIsFixed(true);
+      } else {
+        setIsFixed(false);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -51,7 +68,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
       {/* Main Header */}
-            <header className="bg-gradient-to-r from-orange-600 to-orange-400 shadow-md px-6 py-4">
+      <header className="bg-gradient-to-r from-orange-600 to-orange-400 shadow-md px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center bg-yellow-400 rounded-xl shadow-sm">
@@ -74,10 +91,12 @@ export default function Dashboard() {
       </header>
 
       {/* Sub Header Navigation */}
-      <SubHeaderNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      <div className={`w-full ${isFixed ? 'fixed top-0 z-10' : ''}`}>
+        <SubHeaderNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      </div>
 
       {/* Main Content */}
-      <div className="flex-1 p-4 flex flex-col items-center">
+      <div className="flex-1 p-4 flex flex-col items-center mt-16">
         {activeTab === "dashboard" && <Stats agentData={agentData} />}
         {activeTab === "profile" && <ProfileCard agentData={agentData} currentUser={currentUser} />}
       </div>

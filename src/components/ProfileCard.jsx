@@ -1,24 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Copy, 
-  Check, 
-  Edit2, 
-  X, 
-  Save,
-  User,
-  Phone,
-  Mail,
-  Calendar,
-  MapPin,
-  Building,
-  Map,
-  Globe,
-  Home,
-  Briefcase,
-  AlertCircle
-} from 'lucide-react';
-import { db } from '../firebase/config';
+import React, { useState, useEffect, useRef } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../firebase/config';
+import { ClipboardCopy, Camera } from 'lucide-react';
+import domtoimage from 'dom-to-image';
 
 const generateReferenceCode = () => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -28,484 +13,464 @@ const generateReferenceCode = () => {
     .join("");
 };
 
-const EditableField = ({ 
-  value, 
-  onChange, 
-  isEditing, 
-  fieldName, 
-  disabled, 
-  icon: Icon, 
-  type = "text",
-  error,
-  onBlur
-}) => (
-  <div className="relative">
-    <div className="flex items-center gap-2">
-      {Icon && <Icon className="w-4 h-4 text-orange-500" />}
-      {fieldName === 'dob' && isEditing && !disabled ? (
-        <input
-          type="date"
-          value={value || ''}
-          onChange={(e) => onChange(fieldName, e.target.value)}
-          onBlur={onBlur}
-          disabled={!isEditing || disabled}
-          max={new Date().toISOString().split('T')[0]}
-          className={`w-full p-2 rounded ${
-            isEditing && !disabled
-              ? 'border border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200'
-              : 'bg-transparent border-none'
-          } ${error ? 'border-red-500' : ''}`}
-        />
-      ) : (
-        <input
-          type={type}
-          value={value || ''}
-          onChange={(e) => onChange(fieldName, e.target.value)}
-          onBlur={onBlur}
-          disabled={!isEditing || disabled}
-          className={`w-full p-2 rounded ${
-            isEditing && !disabled
-              ? 'border border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200'
-              : 'bg-transparent border-none'
-          } ${error ? 'border-red-500' : ''}`}
-        />
-      )}
-    </div>
-    {error && (
-      <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-        <AlertCircle className="w-3 h-3" />
-        {error}
-      </p>
-    )}
-  </div>
-);
-
 const ProfileCard = ({ agentData, currentUser }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [editedData, setEditedData] = useState(agentData);
-  const [isCopied, setIsCopied] = useState(false);
+  const [formData, setFormData] = useState(agentData);
+  const [locationData, setLocationData] = useState({
+    district: agentData.district || '',
+    region: agentData.region || '',
+    state: agentData.state || ''
+  });
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
+  const [nameError, setNameError] = useState('');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
-    const initializeReferenceCode = async () => {
-      if (!agentData.referenceCode) {
-        const newReferenceCode = generateReferenceCode();
-        try {
-          const docRef = doc(db, "agents", currentUser.uid);
-          await updateDoc(docRef, { referenceCode: newReferenceCode });
-          setEditedData(prev => ({ ...prev, referenceCode: newReferenceCode }));
-        } catch (error) {
-          console.error("Error generating reference code:", error);
-        }
-      }
-    };
-
-    initializeReferenceCode();
-  }, [agentData.referenceCode, currentUser.uid]);
-
-  const validateFields = () => {
-    const newErrors = {};
-    
-    if (/\d/.test(editedData.name)) {
-      newErrors.name = 'Name cannot contain numbers';
+    if (!formData.referenceCode) {
+      const newCode = generateReferenceCode();
+      setFormData(prev => ({ ...prev, referenceCode: newCode }));
+      updateAgentReferenceCode(newCode);
     }
+  }, []);
 
-    if (!/^\d{6}$/.test(editedData.pincode)) {
-      newErrors.pincode = 'Pincode must be 6 digits';
+  const updateAgentReferenceCode = async (code) => {
+    try {
+      const docRef = doc(db, "agents", currentUser.uid);
+      await updateDoc(docRef, { referenceCode: code });
+    } catch (error) {
+      console.error("Error updating reference code:", error);
     }
-
-    if (!/^\d+$/.test(editedData.experience)) {
-      newErrors.experience = 'Experience must be a number';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
   };
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Check if file is an image
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file');
+      return;
+    }
+
+    // Check file size (e.g., limit to 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size should be less than 5MB');
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      // Create the storage reference
+      const storageRef = ref(storage, `display-pictures/${currentUser.uid}/${file.name}`);
+      
+      // Upload the file
+      await uploadBytes(storageRef, file);
+      
+      // Get the download URL
+      const downloadURL = await getDownloadURL(storageRef);
+      
+      // Update the form data
+      setFormData(prev => ({
+        ...prev,
+        displayPictureUrl: downloadURL
+      }));
+
+      // Update in Firestore
+      const docRef = doc(db, "agents", currentUser.uid);
+      await updateDoc(docRef, {
+        displayPictureUrl: downloadURL
+      });
+
+    } catch (error) {
+      console.error("Error uploading photo:", error);
+      alert('Failed to upload photo. Please try again.');
+    }
+    setUploadingPhoto(false);
+  };
+
+  const formatDate = (dateValue) => {
+    if (!dateValue) return 'N/A';
+    
+    try {
+      // Handle Firestore Timestamp
+      if (dateValue.toDate) {
+        return dateValue.toDate().toLocaleDateString();
+      }
+      // Handle string or Date object
+      return new Date(dateValue).toLocaleDateString();
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return 'Invalid Date';
+    }
+  };
+
 
   const calculateAge = (dob) => {
     const birthDate = new Date(dob);
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDifference = today.getMonth() - birthDate.getMonth();
-    if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) {
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
     return age;
   };
 
-  // Validation functions
-  const validatePincode = useCallback((pincode) => {
-    return /^\d{6}$/.test(pincode);
-  }, []);
-
-  const validateExperience = useCallback((experience, age) => {
-    if (!experience) return true;
-    const numExperience = Number(experience);
-    return /^\d+$/.test(experience) && (!age || numExperience <= age);
-  }, []);
-
-  // Field change handler
-  const handleFieldChange = useCallback((field, value) => {
-    if (field === 'dob') {
-      const age = calculateAge(value);
-      setEditedData(prev => ({
-        ...prev,
-        dob: value,
-        age: age
-      }));
-    } else {
-      setEditedData(prev => ({
-        ...prev,
-        [field]: value
-      }));
-    }
-  }, []);
-
-  // Blur handlers for validation
-  const handlePincodeBlur = useCallback(async () => {
-    const pincode = editedData.pincode;
-    if (!pincode) return;
-
-    if (!validatePincode(pincode)) {
-      setErrors(prev => ({
-        ...prev,
-        pincode: 'Pincode must be 6 digits'
-      }));
-      return;
-    }
-
-    try {
-      const response = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
-      const data = await response.json();
-      if (data[0].Status === 'Success') {
-        const { District, Region, State } = data[0].PostOffice[0];
-        setEditedData(prev => ({
-          ...prev,
-          district: District,
-          region: Region,
-          state: State
-        }));
-        setErrors(prev => ({
-          ...prev,
-          pincode: null
-        }));
-      } else {
-        setErrors(prev => ({
-          ...prev,
-          pincode: 'Invalid pincode'
-        }));
+  const handlePincodeChange = async (pincode) => {
+    if (pincode.length === 6) {
+      try {
+        const response = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
+        const data = await response.json();
+        if (data[0].Status === "Success") {
+          const postOffice = data[0].PostOffice[0];
+          setLocationData({
+            district: postOffice.District,
+            region: postOffice.Division,
+            state: postOffice.State
+          });
+          setFormData(prev => ({
+            ...prev,
+            district: postOffice.District,
+            region: postOffice.Division,
+            state: postOffice.State
+          }));
+        }
+      } catch (error) {
+        console.error("Error fetching location data:", error);
       }
-    } catch (error) {
-      console.error('Error fetching location details:', error);
     }
-  }, [editedData.pincode, validatePincode]);
+  };
 
-  const handleExperienceBlur = useCallback(() => {
-    const isValid = validateExperience(editedData.experience, editedData.age);
-    if (!isValid) {
-      setErrors(prev => ({
-        ...prev,
-        experience: 'Experience cannot be more than age'
-      }));
-      setEditedData(prev => ({
-        ...prev,
-        experience: ''
-      }));
-    } else {
-      setErrors(prev => ({
-        ...prev,
-        experience: null
-      }));
-    }
-  }, [editedData.experience, editedData.age, validateExperience]);
-
-  const handleSave = async () => {
-    if (!validateFields()) {
-      return;
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    
+    if (name === 'name') {
+      // Check if name contains numbers
+      if (/\d/.test(value)) {
+        setNameError('Name should not contain numbers');
+        return;
+      } else {
+        setNameError('');
+      }
     }
 
+    if (name === 'pincode') {
+      handlePincodeChange(value);
+    }
+    if (name === 'experience') {
+      const age = calculateAge(formData.dob);
+      if (parseInt(value) >= age) {
+        return;
+      }
+    }
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async () => {
     setLoading(true);
     try {
       const docRef = doc(db, "agents", currentUser.uid);
-      const { referenceCode, ...dataToUpdate } = editedData;
-      await updateDoc(docRef, dataToUpdate);
+      await updateDoc(docRef, formData);
       setIsEditing(false);
     } catch (error) {
       console.error("Error updating profile:", error);
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
-  const handleCancel = () => {
-    setEditedData(agentData);
-    setIsEditing(false);
-    setErrors({});
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
   };
 
-  const copyReferenceCode = async () => {
-    if (editedData.referenceCode) {
-      await navigator.clipboard.writeText(editedData.referenceCode);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-    }
-  };
-
-  // Fetch location details immediately without debounce
-  const fetchLocationDetails = async (pincode) => {
-    if (!/^\d{6}$/.test(pincode)) return;
-    
-    try {
-      const response = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
-      const data = await response.json();
-      if (data[0].Status === 'Success') {
-        const { District, Region, State } = data[0].PostOffice[0];
-        setEditedData(prev => ({
-          ...prev,
-          district: District,
-          region: Region,
-          state: State
-        }));
-      } else {
-        setErrors(prev => ({
-          ...prev,
-          pincode: 'Invalid pincode'
-        }));
-      }
-    } catch (error) {
-      console.error('Error fetching location details:', error);
-    }
-  };
-
-  useEffect(() => {
-    if (editedData.pincode) {
-      fetchLocationDetails(editedData.pincode);
-    }
-  }, [editedData.pincode]);
-
-  const Section = ({ label, children }) => (
-    <div className="mb-6">
-      <p className="text-sm font-medium text-orange-600 mb-2">{label}</p>
-      {children}
-    </div>
-  );
 
   return (
-  <div className="bg-white rounded-2xl shadow-lg p-8 max-w-4xl mx-auto w-full border border-orange-100">
-    {/* Header Controls */}
-    <div className="flex justify-between items-center mb-8">
-      <h2 className="text-2xl font-semibold text-orange-800">Profile Details</h2>
-      <div className="flex gap-2">
-        {!isEditing ? (
+  <div className="w-full max-w-4xl mx-auto bg-white rounded-xl overflow-hidden shadow-xl">
+    {/* Header */}
+    <div className="relative bg-gradient-to-r from-orange-400 to-orange-600 p-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-white">Agent Profile</h2>
+        <div className="flex gap-3">
           <button
-            onClick={() => setIsEditing(true)}
-            className="flex items-center gap-2 px-4 py-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all duration-200 font-medium"
+            onClick={() => {
+              const profileCard = document.querySelector('.profile-card');
+              if (profileCard) {
+                // First, temporarily remove any fixed/sticky positioning
+                const originalStyles = new Map();
+                const elements = profileCard.querySelectorAll('*');
+                elements.forEach(el => {
+                  const position = window.getComputedStyle(el).position;
+                  if (position === 'fixed' || position === 'sticky') {
+                    originalStyles.set(el, position);
+                    el.style.position = 'static';
+                  }
+                });
+
+                // Create canvas
+                const tempCanvas = document.createElement('canvas');
+                const context = tempCanvas.getContext('2d');
+                tempCanvas.width = profileCard.offsetWidth;
+                tempCanvas.height = profileCard.offsetHeight;
+
+                // Draw white background
+                context.fillStyle = '#FFFFFF';
+                context.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+                // Convert to image
+                domtoimage.toPng(profileCard)
+                  .then((dataUrl) => {
+                    const link = document.createElement('a');
+                    link.download = `profile-${formData.name || 'agent'}.png`;
+                    link.href = dataUrl;
+                    link.click();
+
+                    // Restore original positioning
+                    originalStyles.forEach((position, element) => {
+                      element.style.position = position;
+                    });
+                  })
+                  .catch(error => {
+                    console.error('Error generating image:', error);
+                    alert('Failed to generate image. Please try again.');
+                    
+                    // Restore original positioning
+                    originalStyles.forEach((position, element) => {
+                      element.style.position = position;
+                    });
+                  });
+              }
+            }}
+            className="p-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200"
+            title="Download Profile Image"
           >
-            <Edit2 className="w-4 h-4" />
-            Edit Profile
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+              <polyline points="16 6 12 2 8 6"/>
+              <line x1="12" y1="2" x2="12" y2="15"/>
+            </svg>
           </button>
-        ) : (
-          <div className="flex gap-2">
+          {!isEditing ? (
             <button
-              onClick={handleCancel}
-              className="flex items-center gap-2 px-4 py-2 text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg transition-all duration-200 font-medium"
-              disabled={loading}
+              onClick={() => setIsEditing(true)}
+              className="px-4 py-2 bg-white text-orange-600 rounded-lg font-medium hover:bg-orange-50 transition-all duration-200"
             >
-              <X className="w-4 h-4" />
-              Cancel
+              Edit Profile
             </button>
-            <button
-              onClick={handleSave}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={loading || Object.keys(errors).length > 0}
-            >
-              <Save className="w-4 h-4" />
-              {loading ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-
-    {/* Validation Errors Alert */}
-    {Object.keys(errors).length > 0 && (
-      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg mb-6" role="alert">
-        <div className="flex items-center gap-2">
-          <AlertCircle className="w-5 h-5 text-red-500" />
-          <p className="text-red-700 font-medium">Please fix the highlighted errors before saving</p>
-        </div>
-      </div>
-    )}
-
-    <div className="flex flex-col lg:flex-row gap-12">
-      {/* Left Column - Profile Image & Basic Info */}
-      <div className="lg:w-1/3">
-        <div className="flex flex-col items-center lg:items-start space-y-6">
-          {/* Profile Image */}
-          <div className="relative group">
-            <div className="absolute inset-0 bg-blue-100 rounded-full blur-xl opacity-50 group-hover:opacity-75 transition-opacity"></div>
-            <img
-              src={editedData.displayPictureUrl}
-              alt={`${editedData.name}'s profile`}
-              className="relative h-40 w-40 rounded-full object-cover border-4 border-white shadow-xl transition-transform duration-300 group-hover:scale-105"
-            />
-          </div>
-
-          {/* Basic Info */}
-          <div className="w-full space-y-4">
-            <EditableField
-              value={editedData.name}
-              onChange={handleFieldChange}
-              isEditing={isEditing}
-              fieldName="name"
-              icon={User}
-              error={errors.name}
-            />
-            <p className="text-sm text-orange-500 flex items-center gap-2">
-              <Calendar className="w-4 h-4" />
-              Member since {new Date(editedData.createdAt).toLocaleDateString()}
-            </p>
-          </div>
-
-          {/* Reference Code */}
-          {editedData.referenceCode && (
-            <div className="w-full p-4 bg-orange-50 rounded-xl border border-orange-200 hover:border-blue-200 transition-colors duration-200">
-              <p className="text-sm font-medium text-orange-700 mb-2">Reference Code</p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 bg-white px-3 py-2 rounded-lg border border-orange-200 font-mono text-sm">
-                  {editedData.referenceCode}
-                </code>
-                <button
-                  onClick={copyReferenceCode}
-                  className="p-2 hover:bg-blue-50 rounded-lg transition-colors"
-                  title="Copy reference code"
-                >
-                  {isCopied ? (
-                    <Check className="w-4 h-4 text-green-600" />
-                  ) : (
-                    <Copy className="w-4 h-4 text-blue-600" />
-                  )}
-                </button>
-              </div>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="px-4 py-2 bg-white text-orange-600 rounded-lg font-medium hover:bg-orange-50 transition-all duration-200 disabled:opacity-70"
+              >
+                {loading ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                onClick={() => {
+                  setFormData(agentData);
+                  setIsEditing(false);
+                }}
+                className="px-4 py-2 bg-orange-700 text-white rounded-lg font-medium hover:bg-orange-800 transition-all duration-200"
+              >
+                Cancel
+              </button>
             </div>
           )}
         </div>
       </div>
+    </div>
 
-      {/* Right Column - Details Grid */}
-      <div className="lg:w-2/3 grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Contact Information */}
-        <div className="space-y-6">
-          <Section label="Contact Information">
-            <div className="space-y-4 bg-orange-50 p-4 rounded-xl">
-              <EditableField
-                value={editedData.phoneNumber}
-                onChange={handleFieldChange}
-                isEditing={false}
-                fieldName="phoneNumber"
-                disabled={true}
-                icon={Phone}
+    <div className="p-6 space-y-6">
+      {/* Profile Header with Image */}
+      <div className="flex flex-col md:flex-row gap-6 items-start">
+        <div className="relative group">
+          <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md">
+            <img
+              src={formData.displayPictureUrl || '/placeholder-profile.jpg'}
+              alt="Profile"
+              className="w-full h-full object-cover"
+            />
+          </div>
+          {isEditing && (
+            <>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handlePhotoChange}
+                accept="image/*"
+                className="hidden"
               />
-              <EditableField
-                value={editedData.email}
-                onChange={handleFieldChange}
-                isEditing={false}
-                fieldName="email"
-                disabled={true}
-                icon={Mail}
-              />
+              <button 
+                onClick={() => fileInputRef.current.click()}
+                disabled={uploadingPhoto}
+                className="absolute bottom-2 right-2 p-2 bg-orange-500 rounded-full text-white hover:bg-orange-600 transition-colors shadow-md group-hover:opacity-100 opacity-90"
+              >
+                {uploadingPhoto ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>
+                ) : (
+                  <Camera size={16} />
+                )}
+              </button>
+            </>
+          )}
+        </div>
+        
+        <div className="flex-1 space-y-4">
+          <div>
+            {isEditing ? (
+              <div>
+                <input
+                  type="text"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleInputChange}
+                  className={`w-full px-3 py-2 text-lg font-medium rounded-lg border ${
+                    nameError ? 'border-red-500 bg-red-50' : 'border-gray-200'
+                  } focus:outline-none focus:ring-2 focus:ring-orange-500`}
+                  placeholder="Enter your name"
+                />
+                {nameError && (
+                  <p className="mt-1 text-sm text-red-600 bg-red-50 px-3 py-1 rounded-md">
+                    {nameError}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <h3 className="text-xl font-medium text-gray-800">{formData.name}</h3>
+            )}
+          </div>
+          
+          <div className="flex flex-wrap gap-4">
+            <div className="flex items-center text-sm text-gray-600">
+              <span className="mr-2">Created:</span>
+              <span className="font-medium text-gray-800">{formatDate(formData.createdAt)}</span>
             </div>
-          </Section>
+            <div className="flex items-center">
+              <span className="text-sm text-gray-600 mr-2">Reference:</span>
+              <div className="flex items-center bg-orange-50 px-3 py-1 rounded-lg">
+                <span className="text-sm text-orange-700 font-medium">{formData.referenceCode}</span>
+                <button
+                  onClick={() => copyToClipboard(formData.referenceCode)}
+                  className="ml-2 text-orange-600 hover:text-orange-800"
+                >
+                  <ClipboardCopy size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-          <Section label="Personal Details">
-            <div className="space-y-4 bg-orange-50 p-4 rounded-xl">
-              <EditableField
-                value={editedData.experience}
-                onChange={handleFieldChange}
-                onBlur={handleExperienceBlur}
-                isEditing={isEditing}
-                fieldName="experience"
-                icon={Briefcase}
-                error={errors.experience}
+      {/* Contact & Personal Info */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="p-4 bg-gray-50 rounded-lg transition-all hover:bg-gray-100">
+          <div className="text-sm text-gray-600 mb-1">Phone Number</div>
+          <div className="font-medium text-gray-800">{formData.phoneNumber}</div>
+        </div>
+        <div className="p-4 bg-gray-50 rounded-lg transition-all hover:bg-gray-100">
+          <div className="text-sm text-gray-600 mb-1">Email</div>
+          <div className="font-medium text-gray-800">{formData.email}</div>
+        </div>
+        <div className="p-4 bg-gray-50 rounded-lg transition-all hover:bg-gray-100">
+          <div className="text-sm text-gray-600 mb-1">Age</div>
+          <div className="font-medium text-gray-800">{calculateAge(formData.dob)} years</div>
+        </div>
+      </div>
+
+      {/* Experience & Birth Date */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-4 bg-gray-50 rounded-lg">
+          <div className="text-sm text-gray-600 mb-1">Experience</div>
+          {isEditing ? (
+            <input
+              type="number"
+              name="experience"
+              value={formData.experience}
+              onChange={handleInputChange}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+          ) : (
+            <div className="font-medium text-gray-800">{formData.experience} years</div>
+          )}
+        </div>
+        <div className="p-4 bg-gray-50 rounded-lg">
+          <div className="text-sm text-gray-600 mb-1">Date of Birth</div>
+          {isEditing ? (
+            <input
+              type="date"
+              name="dob"
+              value={formData.dob}
+              onChange={handleInputChange}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+          ) : (
+            <div className="font-medium text-gray-800">{new Date(formData.dob).toLocaleDateString()}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Location Details */}
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <div className="text-sm text-gray-600 mb-1">Pincode</div>
+            {isEditing ? (
+              <input
+                type="text"
+                name="pincode"
+                value={formData.pincode}
+                onChange={handleInputChange}
+                maxLength={6}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
-              <EditableField
-                value={editedData.age}
-                onChange={handleFieldChange}
-                isEditing={false}
-                fieldName="age"
-                disabled={true}
-                icon={User}
-              />
-              <EditableField
-                value={editedData.dob}
-                onChange={handleFieldChange}
-                isEditing={isEditing}
-                fieldName="dob"
-                icon={Calendar}
-              />
-            </div>
-          </Section>
+            ) : (
+              <div className="font-medium text-gray-800">{formData.pincode}</div>
+            )}
+          </div>
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <div className="text-sm text-gray-600 mb-1">District</div>
+            <div className="font-medium text-gray-800">{locationData.district || 'N/A'}</div>
+          </div>
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <div className="text-sm text-gray-600 mb-1">Region</div>
+            <div className="font-medium text-gray-800">{locationData.region || 'N/A'}</div>
+          </div>
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <div className="text-sm text-gray-600 mb-1">State</div>
+            <div className="font-medium text-gray-800">{locationData.state || 'N/A'}</div>
+          </div>
         </div>
 
-        {/* Location Details */}
-        <div className="space-y-6">
-          <Section label="Location Details">
-            <div className="space-y-4 bg-orange-50 p-4 rounded-xl">
-              <EditableField
-                value={editedData.pincode}
-                onChange={handleFieldChange}
-                onBlur={handlePincodeBlur}
-                isEditing={isEditing}
-                fieldName="pincode"
-                icon={MapPin}
-                error={errors.pincode}
+        {/* Address */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <div className="text-sm text-gray-600 mb-1">Address Line 1</div>
+            {isEditing ? (
+              <input
+                type="text"
+                name="addressLine1"
+                value={formData.addressLine1}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
-              <EditableField
-                value={editedData.district}
-                onChange={handleFieldChange}
-                isEditing={false}
-                fieldName="district"
-                disabled={true}
-                icon={Building}
+            ) : (
+              <div className="font-medium text-gray-800">{formData.addressLine1}</div>
+            )}
+          </div>
+          <div className="p-4 bg-gray-50 rounded-lg">
+            <div className="text-sm text-gray-600 mb-1">Address Line 2</div>
+            {isEditing ? (
+              <input
+                type="text"
+                name="addressLine2"
+                value={formData.addressLine2}
+                onChange={handleInputChange}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
-              <EditableField
-                value={editedData.region}
-                onChange={handleFieldChange}
-                isEditing={false}
-                fieldName="region"
-                disabled={true}
-                icon={Map}
-              />
-              <EditableField
-                value={editedData.state}
-                onChange={handleFieldChange}
-                isEditing={false}
-                fieldName="state"
-                disabled={true}
-                icon={Globe}
-              />
-            </div>
-          </Section>
-
-          <Section label="Complete Address">
-            <div className="space-y-4 bg-orange-50 p-4 rounded-xl">
-              <EditableField
-                value={editedData.addressLine1}
-                onChange={handleFieldChange}
-                isEditing={isEditing}
-                fieldName="addressLine1"
-                icon={Home}
-              />
-              <EditableField
-                value={editedData.addressLine2}
-                onChange={handleFieldChange}
-                isEditing={isEditing}
-                fieldName="addressLine2"
-                icon={Building}
-              />
-            </div>
-          </Section>
+            ) : (
+              <div className="font-medium text-gray-800">{formData.addressLine2}</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
