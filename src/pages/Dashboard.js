@@ -54,7 +54,7 @@ export default function Dashboard() {
             <header className="bg-gradient-to-r from-orange-600 to-orange-400 shadow-md px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           {/* Logo */}
-          <div className="flex items-center shadow-sm">
+          <div className="flex items-center bg-yellow-400 rounded-xl shadow-sm">
             <img src={Logo} alt="YaduVivah Logo" className="h-12 w-auto" />
           </div>
       
