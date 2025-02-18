@@ -65,34 +65,48 @@ const ChartCard = ({ title, children }) => {
 };
 
 const Stats = ({ agentData }) => {
-   const [totalUsers, setTotalUsers] = useState(0);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [premiumUsers, setPremiumUsers] = useState(0);
   const db = getFirestore();
   const auth = getAuth();
 
   useEffect(() => {
-  const fetchUsers = async () => {
-    if (!auth.currentUser) return;
-    
-    const agentRef = doc(db, "agents", auth.currentUser.uid);
-    const agentSnap = await getDoc(agentRef);
+    const fetchUsers = async () => {
+      if (!auth.currentUser) return;
+      
+      const agentRef = doc(db, "agents", auth.currentUser.uid);
+      const agentSnap = await getDoc(agentRef);
 
-    if (agentSnap.exists()) {
-      const referenceCode = agentSnap.data().referenceCode;
-      const usersQuery = query(collection(db, "users"), where("agentRefCode", "==", referenceCode));
-      const usersSnap = await getDocs(usersQuery);
-      const totalUsersCount = usersSnap.size;
+      if (agentSnap.exists()) {
+        const referenceCode = agentSnap.data().referenceCode;
 
-      setTotalUsers(totalUsersCount);
+        // Fetch total users
+        const usersQuery = query(collection(db, "users"), where("agentRefCode", "==", referenceCode));
+        const usersSnap = await getDocs(usersQuery);
+        const totalUsersCount = usersSnap.size;
+        setTotalUsers(totalUsersCount);
 
-      // Update agent's document with the total number of users
-      await updateDoc(agentRef, {
-        totalNumberofUsers: totalUsersCount
-      });
-    }
-  };
+        // Fetch premium users
+        const premiumUsersQuery = query(
+          collection(db, "users"),
+          where("agentRefCode", "==", referenceCode),
+          where("payment", "==", true),
+          where("paymentType", "==", "A")
+        );
+        const premiumUsersSnap = await getDocs(premiumUsersQuery);
+        const premiumUsersCount = premiumUsersSnap.size;
+        setPremiumUsers(premiumUsersCount);
 
-  fetchUsers();
-}, [auth, db]);
+        // Update agent's document with the total number of users and premium users
+        await updateDoc(agentRef, {
+          totalNumberofUsers: totalUsersCount,
+          premiumUsers: premiumUsersCount
+        });
+      }
+    };
+
+    fetchUsers();
+  }, [auth, db]);
 
   const currentMonth = new Date().toLocaleString('default', { month: 'long' });
   const lastMonth = new Date(new Date().setMonth(new Date().getMonth() - 1))
@@ -179,7 +193,7 @@ const Stats = ({ agentData }) => {
         />
         <StatCard
           title="Premium Users"
-          value={agentData.premiumUsers?.toLocaleString() || 0}
+          value={premiumUsers.toLocaleString()}
           icon={Calendar}
           description="Active premium subscriptions"
         />
@@ -248,38 +262,6 @@ const Stats = ({ agentData }) => {
             />
           </BarChart>
         </ChartCard>
-
-        {/* <ChartCard title="User Distribution">
-          <PieChart>
-            <Pie
-              data={userDistributionData}
-              innerRadius={60}
-              outerRadius={80}
-              paddingAngle={5}
-              dataKey="value"
-              onMouseEnter={(_, index) => setSelectedPieIndex(index)}
-              onMouseLeave={() => setSelectedPieIndex(null)}
-            >
-              {userDistributionData.map((entry, index) => (
-                <Cell 
-                  key={`cell-${index}`} 
-                  fill={COLORS[index % COLORS.length]}
-                  opacity={selectedPieIndex === null || selectedPieIndex === index ? 1 : 0.6}
-                  className="transition-opacity duration-300"
-                />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{ 
-                backgroundColor: '#F9FAFB',
-                border: 'none',
-                borderRadius: '0.5rem',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-              }}
-            />
-            <Legend />
-          </PieChart>
-        </ChartCard> */}
       </div>
 
       <div className="bg-white rounded-xl shadow-lg p-6">
