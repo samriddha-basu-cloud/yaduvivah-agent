@@ -4,6 +4,8 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
+import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 
 // Enhanced StatCard with hover and click animations
 const StatCard = ({ title, value, icon: Icon, trend, description }) => {
@@ -63,6 +65,35 @@ const ChartCard = ({ title, children }) => {
 };
 
 const Stats = ({ agentData }) => {
+   const [totalUsers, setTotalUsers] = useState(0);
+  const db = getFirestore();
+  const auth = getAuth();
+
+  useEffect(() => {
+  const fetchUsers = async () => {
+    if (!auth.currentUser) return;
+    
+    const agentRef = doc(db, "agents", auth.currentUser.uid);
+    const agentSnap = await getDoc(agentRef);
+
+    if (agentSnap.exists()) {
+      const referenceCode = agentSnap.data().referenceCode;
+      const usersQuery = query(collection(db, "users"), where("agentRefCode", "==", referenceCode));
+      const usersSnap = await getDocs(usersQuery);
+      const totalUsersCount = usersSnap.size;
+
+      setTotalUsers(totalUsersCount);
+
+      // Update agent's document with the total number of users
+      await updateDoc(agentRef, {
+        totalNumberofUsers: totalUsersCount
+      });
+    }
+  };
+
+  fetchUsers();
+}, [auth, db]);
+
   const currentMonth = new Date().toLocaleString('default', { month: 'long' });
   const lastMonth = new Date(new Date().setMonth(new Date().getMonth() - 1))
     .toLocaleString('default', { month: 'long' });
@@ -117,9 +148,8 @@ const Stats = ({ agentData }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <StatCard
           title="Total Users"
-          value={agentData.totalUsers?.toLocaleString() || 0}
+          value={totalUsers.toLocaleString()}
           icon={Users}
-          trend={userTrend}
           description="Total profiles created"
         />
         <StatCard
