@@ -72,12 +72,12 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center bg-yellow-400 rounded-xl shadow-sm">
-            <img src={Logo} alt="YaduVivah Logo" className="h-12 w-auto" />
+            <img src={Logo} alt="Yaduvivaah Logo" className="h-12 w-auto" />
           </div>
       
           {/* Title */}
           <h1 className="text-3xl font-extrabold text-white hidden sm:block shadow-sm">
-            YaduVivah Agent Panel
+            Yaduvivaah Agent Panel
           </h1>
       
           {/* Logout Button */}
